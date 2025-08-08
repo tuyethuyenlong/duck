@@ -1,0 +1,284 @@
+<!-- file: /duck-race-40/index.html -->
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>40 Ducks Race — GitHub Pages Ready</title>
+  <style>
+    :root{--track-w:900px;--lane-h:48px;--duck-h:40px}
+    body{font-family:Inter,system-ui,Arial;margin:0;color:#222}
+    header{padding:12px 20px;background:#0b72c4;color:#fff}
+    .wrap{display:flex;gap:18px;padding:18px}
+
+    /* left panel */
+    .panel{width:360px}
+    .panel h2{margin:0 0 12px}
+    .names-grid{height:620px;overflow:auto;border:1px solid #e3e6ea;padding:8px;border-radius:8px;background:#fbfdff}
+    .names-grid .row{display:flex;gap:8px;margin-bottom:6px}
+    .names-grid input[type=text]{flex:1;padding:6px;border:1px solid #d0d7dd;border-radius:6px}
+    label.small{font-size:12px;color:#555}
+
+    /* right track */
+    .stage{flex:1;background:#e8f2ff;padding:18px;border-radius:8px;border:1px solid #e8eef6}
+    .controls{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+    .controls input[type=number]{width:120px;padding:8px}
+    button{background:#0b72c4;color:white;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}
+    button.ghost{background:#fff;color:#0b72c4;border:1px solid #0b72c4}
+
+    .track{width:var(--track-w);height:calc(var(--lane-h) * 40);position:relative;overflow:hidden;border-radius:10px;border:4px solid #2c6f9b;background:linear-gradient(#3aa0ff,#2f7fb0)}
+    .finish-line{position:absolute;right:120px;top:0;bottom:0;width:8px;background:repeating-linear-gradient(90deg,#fff 0 6px,#000 6px 12px);}
+    .lane{position:absolute;left:0;right:0;height:var(--lane-h);border-bottom:1px solid rgba(255,255,255,0.06)}
+    .duck{position:absolute;height:var(--duck-h);width:auto;left:8px;top:4px;display:flex;align-items:center;gap:8px}
+    .duck img{height:var(--duck-h);width:auto;display:block}
+    .label{background:rgba(255,255,255,0.9);padding:4px 8px;border-radius:999px;font-weight:600}
+
+    .results{margin-top:12px;padding:12px;background:#fff;border-radius:8px;border:1px solid #e6eef6}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:6px;text-align:left;border-bottom:1px solid #eef3f8}
+
+    footer{padding:12px 18px;text-align:center;color:#777}
+
+    /* small responsive */
+    @media(max-width:980px){.wrap{flex-direction:column}.panel{width:100%}}
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Duck Race — 40 V?t</strong>
+  </header>
+
+  <div class="wrap">
+    <div class="panel">
+      <h2>Thi?t l?p</h2>
+      <div class="controls">
+        <label class="small">Th?i gian (giây) — ?nh hu?ng t?c d? (recommend 10-30):</label>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <input id="raceTime" type="number" min="5" max="60" value="12">
+        <button id="fillNames" class="ghost">T? d?ng di?n tên</button>
+        <button id="shuffleNames" class="ghost">Xáo tên</button>
+      </div>
+
+      <div class="names-grid" id="namesGrid"></div>
+
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button id="startBtn">Start Race</button>
+        <button id="resetBtn" class="ghost">Reset</button>
+        <button id="exportBtn" class="ghost">Export names</button>
+      </div>
+
+      <div class="results" id="results" hidden>
+        <h3>Top 10 khi d?ng</h3>
+        <table id="resultsTable"><thead><tr><th>#</th><th>Name</th><th>Distance</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="controls">
+        <div style="font-weight:700">Ðu?ng dua</div>
+        <div style="margin-left:auto">Finish line at <strong>right - 120px</strong></div>
+      </div>
+
+      <div class="track" id="track"></div>
+
+      <footer>Game stops when <strong>1st</strong> duck vu?t dích — hi?n th? top 10 theo kho?ng cách lúc d?ng.</footer>
+    </div>
+  </div>
+
+  <script>
+    /* PSEUDOCODE (dùng d? tham kh?o):
+      1. T?o form 40 input tên. N?u r?ng, gán tên m?c d?nh "Duck 1..40".
+      2. Khi nh?n Start: t?o 40 d?i tu?ng v?t {name, x=8, laneIndex}
+      3. Tính finishX = track.clientWidth - 120 (v? trí v?ch dích)
+      4. T?c d? m?i v?t = base + random, base derived from raceTime input
+      5. Dùng requestAnimationFrame d? c?p nh?t v? trí x += speed * delta
+      6. N?u b?t k? v?t nào x + duckWidth >= finishX => d?ng animation t?ng th?
+      7. Khi d?ng: s?p x?p v?t theo v? trí x gi?m d?n => hi?n th? top 10
+    */
+
+    // --- Setup constants and helpers ---
+    const DUCK_COUNT = 40;
+    const namesGrid = document.getElementById('namesGrid');
+    const track = document.getElementById('track');
+    const startBtn = document.getElementById('startBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const raceTimeInput = document.getElementById('raceTime');
+    const resultsPanel = document.getElementById('results');
+    const resultsTableBody = document.querySelector('#resultsTable tbody');
+    const fillBtn = document.getElementById('fillNames');
+    const shuffleBtn = document.getElementById('shuffleNames');
+    const exportBtn = document.getElementById('exportBtn');
+
+    // A compact duck SVG data-uri (keeps everything self-contained). This is an SVG image encoded as a URI.
+    const duckDataUri = `data:image/svg+xml;utf8,${encodeURIComponent(`
+      <svg xmlns='http://www.w3.org/2000/svg' width='80' height='60' viewBox='0 0 80 60'>
+        <defs><filter id='s' x='-50%' y='-50%' width='200%' height='200%'><feDropShadow dx='0' dy='1' stdDeviation='1' flood-color='#000' flood-opacity='0.2'/></filter></defs>
+        <g filter='url(#s)'>
+          <ellipse cx='30' cy='34' rx='24' ry='14' fill='%23FFD24A'/>
+          <circle cx='16' cy='26' r='10' fill='%23FFD24A'/>
+          <path d='M22 24c6 0 8 6 14 6' fill='none' stroke='%23DD7A00' stroke-width='2'/>
+          <ellipse cx='20' cy='24' rx='2.6' ry='3' fill='%23000' />
+          <path d='M32 32c6 0 10-2 14-2 0 6-6 8-14 8' fill='%23FF9B2C' />
+          <path d='M38 20c2-3 7-5 12-3 4 1 6 5 4 8-1 2-6 3-8 2' fill='%23E44B2A'/>
+        </g>
+      </svg>
+    `)}`;
+
+    // create inputs
+    function createNameInputs(defaults=[]) {
+      namesGrid.innerHTML = '';
+      for (let i=0;i<DUCK_COUNT;i++){
+        const row = document.createElement('div'); row.className='row';
+        const inpt = document.createElement('input'); inpt.type='text'; inpt.placeholder=`Duck ${i+1}`;
+        inpt.value = defaults[i] || '';
+        inpt.dataset.index = i;
+        row.appendChild(inpt);
+        namesGrid.appendChild(row);
+      }
+    }
+
+    // fill with friendly names
+    function autoFillNames(){
+      const sample = [];
+      for(let i=0;i<DUCK_COUNT;i++) sample.push(`V?t ${i+1}`);
+      const inputs = namesGrid.querySelectorAll('input');
+      inputs.forEach((el,i)=>el.value = sample[i]);
+    }
+
+    function shuffleNames(){
+      const inputs = Array.from(namesGrid.querySelectorAll('input'));
+      const vals = inputs.map(i=>i.value || i.placeholder);
+      for(let i=vals.length-1;i>0;i--){
+        const j = Math.floor(Math.random()*(i+1)); [vals[i],vals[j]]=[vals[j],vals[i]];
+      }
+      inputs.forEach((el,i)=>el.value = vals[i]);
+    }
+
+    fillBtn.addEventListener('click',autoFillNames);
+    shuffleBtn.addEventListener('click',shuffleNames);
+
+    // Export names as JSON for convenience
+    exportBtn.addEventListener('click',()=>{
+      const vals = getNames();
+      const blob = new Blob([JSON.stringify(vals,null,2)],{type:'application/json'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download='duck-names.json'; a.click();
+    });
+
+    createNameInputs(); autoFillNames();
+
+    // --- Race setup & animation ---
+    let ducks = []; // {name,el,x,lane}
+    let raf = null; let lastTs = null; let running=false;
+
+    function getNames(){
+      return Array.from(namesGrid.querySelectorAll('input')).map((el,i)=>el.value.trim() || el.placeholder);
+    }
+
+    function buildTrack(){
+      track.innerHTML = '';
+      const trackW = parseInt(getComputedStyle(track).width);
+      for(let i=0;i<DUCK_COUNT;i++){
+        const lane = document.createElement('div'); lane.className='lane';
+        lane.style.top = `${i * parseInt(getComputedStyle(document.documentElement).getPropertyValue('--lane-h'))}px`;
+        lane.style.height = `var(--lane-h)`;
+        track.appendChild(lane);
+      }
+      // finish-line
+      const finish = document.createElement('div'); finish.className='finish-line'; track.appendChild(finish);
+
+      // create ducks elements
+      const names = getNames();
+      ducks = names.map((name,i)=>{
+        const d = document.createElement('div'); d.className='duck';
+        d.style.top = `${i * 48 + 6}px`;
+        d.dataset.index = i;
+        const img = document.createElement('img'); img.src = duckDataUri; img.alt='duck';
+        const lab = document.createElement('span'); lab.className='label'; lab.textContent = name;
+        d.appendChild(img); d.appendChild(lab);
+        track.appendChild(d);
+        return {name,el:d,x:8,lane:i};
+      });
+    }
+
+    function startRace(){
+      if (running) return;
+      buildTrack();
+      const trackRect = track.getBoundingClientRect();
+      const finishX = track.clientWidth - 120; // px
+
+      // derive speed factor from raceTime. We aim ducks to reach finish roughly within time +/- randomness
+      const targetTime = Math.max(5, Math.min(60, Number(raceTimeInput.value) || 12));
+      // base pixels needed: finishX - startX ~ finishX - 8
+      const distance = finishX - 8;
+
+      // each duck has a base speed so that average reaches near targetTime
+      const baseSpeed = distance / (targetTime * 60); // px per frame assuming 60fps -> convert per ms later
+
+      // create speed per ms
+      ducks.forEach(d=>{
+        // introduce variation: some fast, some slow
+        const variability = 0.6 + Math.random()*0.9; // 0.6..1.5
+        // slight burstiness
+        d.speed = baseSpeed * variability; // px per frame @60fps
+        d.x = 8; // reset
+        d.el.style.left = `${d.x}px`;
+      });
+
+      running = true; lastTs = null; resultsPanel.hidden=true; resultsTableBody.innerHTML='';
+
+      function step(ts){
+        if (!lastTs) lastTs = ts; const dt = ts - lastTs; lastTs = ts;
+        // convert speed to px per ms: speed (px/frame@60) * (dt/16.666)
+        const factor = dt / (1000/60);
+        let winner = null;
+        for(const d of ducks){
+          // small random acceleration
+          const acc = (Math.random()*0.12 - 0.06);
+          d.x += d.speed * factor * (1 + acc);
+          // clamp
+          if (d.x < 8) d.x = 8;
+          d.el.style.left = `${d.x}px`;
+          // if reached
+          const elRect = d.el.getBoundingClientRect();
+          if ((d.x + elRect.width) >= finishX && !winner){ winner = d; }
+        }
+        if (winner){
+          // stop and compute rankings by distance
+          cancelAnimationFrame(raf); running=false;
+          // compute sort by x desc
+          const snapshot = ducks.map(d=>({name:d.name,dist:d.x}));
+          snapshot.sort((a,b)=>b.dist - a.dist);
+          showResults(snapshot.slice(0,10));
+          return;
+        }
+        raf = requestAnimationFrame(step);
+      }
+
+      raf = requestAnimationFrame(step);
+    }
+
+    function showResults(list){
+      resultsPanel.hidden=false; resultsTableBody.innerHTML='';
+      list.forEach((r,i)=>{
+        const tr = document.createElement('tr');
+        const td1 = document.createElement('td'); td1.textContent = i+1;
+        const td2 = document.createElement('td'); td2.textContent = r.name;
+        const td3 = document.createElement('td'); td3.textContent = Math.round(r.dist) + ' px';
+        tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+        resultsTableBody.appendChild(tr);
+      });
+    }
+
+    function resetRace(){
+      if (raf) cancelAnimationFrame(raf); running=false; lastTs=null; ducks=[]; track.innerHTML=''; resultsPanel.hidden=true; createNameInputs(); autoFillNames();
+    }
+
+    startBtn.addEventListener('click', startRace);
+    resetBtn.addEventListener('click', resetRace);
+
+    // init
+    buildTrack();
+  </script>
+</body>
+</html>
